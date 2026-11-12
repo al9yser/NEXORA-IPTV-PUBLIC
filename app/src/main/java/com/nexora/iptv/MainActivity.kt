@@ -138,17 +138,21 @@ private fun NexoraApp(
     var epgTitle by remember { mutableStateOf("") }
     var showEpg by remember { mutableStateOf(false) }
 
-    val currentList = when (tab) {
-        0 -> catalog.live
-        1 -> catalog.movies
-        2 -> catalog.series
-        else -> (catalog.live + catalog.movies + catalog.series).filter { favorites.contains(favoriteKey(it)) }
+    val currentList = remember(catalog, tab, favorites) {
+        when (tab) {
+            0 -> catalog.live
+            1 -> catalog.movies
+            2 -> catalog.series
+            else -> (catalog.live + catalog.movies + catalog.series).filter { favorites.contains(favoriteKey(it)) }
+        }
     }
-    val filtered = currentList.filter {
-        (it.name.contains(query, true) || it.group.contains(query, true)) &&
-            (category == "All" || it.group == category)
+    val filtered = remember(currentList, query, category) {
+        currentList.filter {
+            (it.name.contains(query, true) || it.group.contains(query, true)) &&
+                (category == "All" || it.group == category)
+        }
     }
-    val categories = listOf("All") + currentList.map { it.group }.distinct().sorted()
+    val categories = remember(currentList) { listOf("All") + currentList.map { it.group }.distinct().sorted() }
     val total = catalog.live.size + catalog.movies.size + catalog.series.size
 
     BackHandler(enabled = selected != null || showingEpisodes) {
