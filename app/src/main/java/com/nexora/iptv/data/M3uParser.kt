@@ -26,13 +26,21 @@ object M3uParser {
                     pendingGroup = line.substringAfter(':').trim().ifBlank { pendingGroup }
                 }
                 !line.startsWith("#") && (line.startsWith("https://", true) || line.startsWith("http://", true)) -> {
+                    val normalizedGroup = pendingGroup.lowercase()
+                    val mediaType = when {
+                        normalizedGroup.contains("movie") || normalizedGroup.contains("vod") ||
+                            normalizedGroup.contains("film") -> MediaType.MOVIE
+                        normalizedGroup.contains("series") || normalizedGroup.contains("tv show") -> MediaType.SERIES
+                        else -> MediaType.LIVE
+                    }
                     result += Channel(
                         name = pendingName?.takeIf(String::isNotBlank)
                             ?: line.substringAfterLast('/').substringBefore('?').ifBlank { "Channel" },
                         url = line,
                         group = pendingGroup,
                         logo = pendingLogo,
-                        tvgId = pendingId
+                        tvgId = pendingId,
+                        type = mediaType
                     )
                     pendingName = null
                     pendingGroup = "Other"
