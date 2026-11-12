@@ -25,6 +25,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -110,6 +111,8 @@ private fun NexoraApp(
     onPlay: (Channel) -> Unit,
     playerView: @Composable () -> Unit
 ) {
+    val context = LocalContext.current
+    val preferences = remember { context.getSharedPreferences("nexora_preferences", 0) }
     var mode by remember { mutableIntStateOf(0) }
     var sourceUrl by remember { mutableStateOf("") }
     var server by remember { mutableStateOf("") }
@@ -122,7 +125,7 @@ private fun NexoraApp(
     var tab by remember { mutableIntStateOf(0) }
     var query by remember { mutableStateOf("") }
     var category by remember { mutableStateOf("All") }
-    var favorites by remember { mutableStateOf(setOf<String>()) }
+    var favorites by remember { mutableStateOf(preferences.getStringSet("favorites", emptySet())?.toSet() ?: emptySet()) }
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
     var epg by remember { mutableStateOf<List<EpgProgram>>(emptyList()) }
@@ -133,7 +136,7 @@ private fun NexoraApp(
         0 -> catalog.live
         1 -> catalog.movies
         2 -> catalog.series
-        else -> (catalog.live + catalog.movies + catalog.series).filter { favorites.contains(it.url.ifBlank { it.name + it.streamId }) }
+        else -> (catalog.live + catalog.movies + catalog.series).filter { favorites.contains(favoriteKey(it)) }
     }
     val filtered = currentList.filter {
         (it.name.contains(query, true) || it.group.contains(query, true)) &&
@@ -282,7 +285,7 @@ private fun NexoraApp(
                         verticalArrangement = Arrangement.spacedBy(7.dp)
                     ) {
                         items(displayList, key = { it.url + it.name + it.streamId }) { item ->
-                            val key = item.url.ifBlank { item.name + item.streamId }
+                            val key = favoriteKey(item)
                             Surface(color = Panel, shape = RoundedCornerShape(12.dp),
                                 modifier = Modifier.fillMaxWidth().clickable {
                                     if (item.type == MediaType.SERIES && item.streamId != null) {
@@ -311,7 +314,7 @@ private fun NexoraApp(
                                             color = Muted, fontSize = 10.sp, maxLines = 1)
                                     }
                                     IconButton(onClick = {
-                                        favorites = if (favorites.contains(key)) favorites - key else favorites + key
+                                        favorites = (if (favorites.contains(key)) favorites - key else favorites + key).also { preferences.edit().putStringSet("favorites", it).apply() }
                                     }) {
                                         Icon(if (favorites.contains(key)) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                                             contentDescription = "Favorite",
