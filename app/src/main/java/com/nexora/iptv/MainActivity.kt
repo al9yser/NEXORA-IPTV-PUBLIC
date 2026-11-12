@@ -66,7 +66,7 @@ class MainActivity : ComponentActivity() {
                 NexoraApp(
                     onLoadM3u = { url, done -> lifecycleScope.launch {
                         runCatching { repository.loadM3u(url) }
-                            .onSuccess { done(IptvCatalog(it, emptyList(), emptyList()), null) }
+                            .onSuccess { list -> done(IptvCatalog(list.filter { it.type == MediaType.LIVE }, list.filter { it.type == MediaType.MOVIE }, list.filter { it.type == MediaType.SERIES }), null) }
                             .onFailure { done(null, it.message ?: "Unable to load playlist") }
                     } },
                     onXtream = { server, user, pass, done -> lifecycleScope.launch {
