@@ -98,7 +98,7 @@ class IptvRepository {
                         if (id.isBlank() || id == "null") continue
                         val ext = item.optString("container_extension").ifBlank { "mp4" }
                         val title = item.optString("title").ifBlank { "Episode ${i + 1}" }
-                        add(Channel(title, "$base/series/$userPath/$passPath/$id.$ext",
+                        add(Channel(title, "$base/series/${encodePath(username)}/${encodePath(password)}/$id.$ext",
                             "Season $season", type = MediaType.MOVIE, streamId = id, extension = ext))
                     }
                 }
@@ -124,8 +124,6 @@ class IptvRepository {
             }
         }
 
-    private val userPath: String get() = ""
-    private val passPath: String get() = ""
 
     private fun JSONArray.toChannels(base: String, user: String, pass: String, type: MediaType): List<Channel> =
         buildList {
@@ -215,6 +213,7 @@ class IptvRepository {
     }
 
     private fun encode(value: String) = URLEncoder.encode(value, Charsets.UTF_8.name())
+    private fun encodePath(value: String) = encode(value).replace("+", "%20")
     private fun decodeBase64(value: String): String = runCatching {
         String(android.util.Base64.decode(value, android.util.Base64.DEFAULT), Charsets.UTF_8)
     }.getOrDefault(value)
