@@ -3,6 +3,7 @@ package com.nexora.iptv
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
@@ -85,9 +86,11 @@ class MainActivity : ComponentActivity() {
                             .onFailure { done(emptyList(), it.message ?: "EPG unavailable") }
                     } },
                     onPlay = { channel -> player?.apply {
-                        setMediaItem(MediaItem.fromUri(channel.url))
-                        prepare()
-                        playWhenReady = true
+                        if (channel == null) pause() else {
+                            setMediaItem(MediaItem.fromUri(channel.url))
+                            prepare()
+                            playWhenReady = true
+                        }
                     } },
                     playerView = { AndroidView(factory = { context ->
                         PlayerView(context).apply {
@@ -111,7 +114,7 @@ private fun NexoraApp(
     onXtream: (String, String, String, (IptvCatalog?, String?) -> Unit) -> Unit,
     onSeries: (String, String, String, String, (List<Channel>, String?) -> Unit) -> Unit,
     onEpg: (String, String, String, String, (List<EpgProgram>, String?) -> Unit) -> Unit,
-    onPlay: (Channel) -> Unit,
+    onPlay: (Channel?) -> Unit,
     playerView: @Composable () -> Unit
 ) {
     val context = LocalContext.current
@@ -148,6 +151,10 @@ private fun NexoraApp(
     val categories = listOf("All") + currentList.map { it.group }.distinct().sorted()
     val total = catalog.live.size + catalog.movies.size + catalog.series.size
 
+    BackHandler(enabled = selected != null || showingEpisodes) {
+        if (selected != null) { selected = null; onPlay(null) } else showingEpisodes = false
+    }
+
     Column(Modifier.fillMaxSize().background(Night).padding(horizontal = 16.dp)) {
         Row(
             Modifier.fillMaxWidth().padding(top = 18.dp, bottom = 12.dp),
@@ -169,7 +176,7 @@ private fun NexoraApp(
             Spacer(Modifier.height(8.dp))
             playerView()
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = { selected = null }) { Text("‹  Library") }
+                TextButton(onClick = { selected = null; onPlay(null) }) { Text("‹  Library") }
                 Spacer(Modifier.weight(1f))
                 if (item.type == MediaType.LIVE && item.streamId != null && mode == 1) {
                     TextButton(onClick = {
