@@ -48,6 +48,9 @@ private val Panel = Color(0xFF121D2D)
 private val Mint = Color(0xFF55D6BE)
 private val Muted = Color(0xFF9AA9BF)
 
+private fun favoriteKey(channel: Channel): String =
+    "${channel.type.name}|${channel.streamId ?: channel.tvgId ?: channel.name}"
+
 class MainActivity : ComponentActivity() {
     private val repository = IptvRepository()
     private var player: ExoPlayer? = null
