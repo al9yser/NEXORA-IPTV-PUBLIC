@@ -1,5 +1,7 @@
 package com.nexora.iptv.data
 
+import android.util.JsonReader
+import android.util.JsonToken
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -68,12 +70,10 @@ class IptvRepository {
                 }
             }
 
-            val live = getArray("$auth&action=get_live_streams", "Live channels")
-                .toChannels(base, u, p, MediaType.LIVE)
-            val movies = getArray("$auth&action=get_vod_streams", "Movies")
-                .toChannels(base, u, p, MediaType.MOVIE)
-            val series = getArray("$auth&action=get_series", "Series")
-                .toChannels(base, u, p, MediaType.SERIES)
+            // Stream large catalogs directly; avoid holding raw JSON and a full JSONArray at once.
+            val live = getChannels("$auth&action=get_live_streams", "Live channels", base, u, p, MediaType.LIVE)
+            val movies = getChannels("$auth&action=get_vod_streams", "Movies", base, u, p, MediaType.MOVIE)
+            val series = getChannels("$auth&action=get_series", "Series", base, u, p, MediaType.SERIES)
 
             if (live.isEmpty() && movies.isEmpty() && series.isEmpty()) {
                 error("Login succeeded, but the provider returned no channels, movies or series. Check subscription permissions.")
@@ -125,47 +125,59 @@ class IptvRepository {
         }
 
 
-    private fun JSONArray.toChannels(base: String, user: String, pass: String, type: MediaType): List<Channel> =
-        buildList {
-            for (i in 0 until length()) {
-                val item = optJSONObject(i) ?: continue
-                val id = item.optString(if (type == MediaType.SERIES) "series_id" else "stream_id")
-                if (id.isBlank() || id == "null") continue
-                val ext = item.optString("container_extension").ifBlank {
-                    if (type == MediaType.LIVE) "ts" else "mp4"
-                }
-                val name = item.optString("name").ifBlank { item.optString("title") }.ifBlank { "Item $id" }
-                val group = item.optString("category_name").ifBlank {
-                    if (type == MediaType.LIVE) "Live TV" else if (type == MediaType.MOVIE) "Movies" else "Series"
-                }
-                val logo = item.optString(if (type == MediaType.LIVE) "stream_icon" else "cover")
-                    .takeIf { it.startsWith("http") }
-                val url = when (type) {
-                    MediaType.LIVE -> "$base/live/$user/$pass/$id.$ext"
-                    MediaType.MOVIE -> "$base/movie/$user/$pass/$id.$ext"
-                    MediaType.SERIES -> ""
-                }
-                add(Channel(name, url, group, logo,
-                    item.optString("epg_channel_id").takeIf { it.isNotBlank() },
-                    type, id, ext))
-            }
-        }
-
-    private fun getArray(url: String, label: String): JSONArray {
+    private fun getChannels(url: String, label: String, base: String, user: String, pass: String, type: MediaType): List<Channel> {
         val request = Request.Builder().url(url).header("User-Agent", "NEXORA IPTV/1.1")
             .header("Accept", "application/json").build()
         client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) error("$label request failed: HTTP ${response.code}")
-            val raw = response.body?.string().orEmpty()
-            if (raw.isBlank()) error("$label response is empty.")
-            return try {
-                JSONArray(raw)
-            } catch (_: Exception) {
-                val detail = runCatching { JSONObject(raw).optString("message") }.getOrNull()
-                error(if (!detail.isNullOrBlank() && detail != "null")
-                    "$label: $detail" else "$label returned an invalid response. Check the server URL or provider API access.")
+            if (!response.isSuccessful) error(label + " request failed: HTTP " + response.code)
+            val body = response.body ?: error(label + " response is empty.")
+            if (body.contentLength() == 0L) error(label + " response is empty.")
+            val result = ArrayList<Channel>()
+            try {
+                JsonReader(body.charStream()).use { reader ->
+                    reader.isLenient = true
+                    reader.beginArray()
+                    while (reader.hasNext()) {
+                        if (reader.peek() != JsonToken.BEGIN_OBJECT) { reader.skipValue(); continue }
+                        var id = ""; var name = ""; var group = ""; var logo = ""; var epgId = ""; var ext = ""
+                        reader.beginObject()
+                        while (reader.hasNext()) {
+                            when (reader.nextName()) {
+                                "stream_id", "series_id" -> id = readJsonScalar(reader)
+                                "name", "title" -> { val value = readJsonScalar(reader); if (name.isBlank() && value.isNotBlank()) name = value }
+                                "category_name" -> group = readJsonScalar(reader)
+                                "stream_icon", "cover" -> logo = readJsonScalar(reader)
+                                "epg_channel_id" -> epgId = readJsonScalar(reader)
+                                "container_extension" -> ext = readJsonScalar(reader)
+                                else -> reader.skipValue()
+                            }
+                        }
+                        reader.endObject()
+                        if (id.isBlank() || id == "null") continue
+                        if (name.isBlank()) name = "Item " + id
+                        if (group.isBlank()) group = when (type) { MediaType.LIVE -> "Live TV"; MediaType.MOVIE -> "Movies"; MediaType.SERIES -> "Series" }
+                        if (ext.isBlank() || ext == "null") ext = if (type == MediaType.LIVE) "ts" else "mp4"
+                        val image = logo.takeIf { it.startsWith("http", true) }
+                        val streamUrl = when (type) {
+                            MediaType.LIVE -> "$base/live/$user/$pass/$id.$ext"
+                            MediaType.MOVIE -> "$base/movie/$user/$pass/$id.$ext"
+                            MediaType.SERIES -> ""
+                        }
+                        result.add(Channel(name, streamUrl, group, image, epgId.takeIf { it.isNotBlank() && it != "null" }, type, id, ext))
+                    }
+                    reader.endArray()
+                }
+            } catch (e: Exception) {
+                error(label + " returned invalid or unsupported JSON: " + (e.message ?: "parse error"))
             }
+            return result
         }
+    }
+
+    private fun readJsonScalar(reader: JsonReader): String = when (reader.peek()) {
+        JsonToken.STRING, JsonToken.NUMBER, JsonToken.BOOLEAN -> reader.nextString()
+        JsonToken.NULL -> { reader.nextNull(); "" }
+        else -> { reader.skipValue(); "" }
     }
 
     private fun getJsonObject(url: String, label: String): JSONObject {
