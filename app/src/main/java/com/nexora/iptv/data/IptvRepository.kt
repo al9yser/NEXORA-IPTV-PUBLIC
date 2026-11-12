@@ -175,7 +175,8 @@ class IptvRepository {
     }
 
     private fun readJsonScalar(reader: JsonReader): String = when (reader.peek()) {
-        JsonToken.STRING, JsonToken.NUMBER, JsonToken.BOOLEAN -> reader.nextString()
+        JsonToken.STRING, JsonToken.NUMBER -> reader.nextString()
+        JsonToken.BOOLEAN -> reader.nextBoolean().toString()
         JsonToken.NULL -> { reader.nextNull(); "" }
         else -> { reader.skipValue(); "" }
     }
