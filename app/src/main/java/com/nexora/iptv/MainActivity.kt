@@ -1,6 +1,11 @@
 package com.nexora.iptv
 
 import android.os.Bundle
+import android.content.pm.ActivityInfo
+import android.view.View
+import androidx.media3.common.C
+import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
+import androidx.media3.ui.TrackSelectionDialogBuilder
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.BackHandler
@@ -67,10 +72,12 @@ private fun favoriteKey(channel: Channel): String =
 class MainActivity : ComponentActivity() {
     private val repository = IptvRepository()
     private var player: ExoPlayer? = null
+    private lateinit var trackSelector: DefaultTrackSelector
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        player = ExoPlayer.Builder(this).build()
+        trackSelector = DefaultTrackSelector(this)
+        player = ExoPlayer.Builder(this).setTrackSelector(trackSelector).build()
         setContent {
             MaterialTheme(
                 colorScheme = darkColorScheme(
@@ -118,17 +125,32 @@ class MainActivity : ComponentActivity() {
                             playWhenReady = true
                         }
                     } },
-                    playerView = {
+                    playerView = { fullscreen ->
                         AndroidView(
                             factory = { context ->
                                 PlayerView(context).apply {
                                     player = this@MainActivity.player
                                     useController = true
+                                    controllerAutoShow = true
+                                    controllerShowTimeoutMs = 4500
                                     setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
+                                    setKeepContentOnPlayerReset(true)
+                                    resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
                                 }
                             },
-                            modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f)
+                            modifier = if (fullscreen) Modifier.fillMaxSize() else Modifier.fillMaxWidth().aspectRatio(16f / 9f)
                         )
+                    },
+                    onFullscreen = { enabled ->
+                        requestedOrientation = if (enabled) ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                        if (enabled) {
+                            window.decorView.systemUiVisibility = (View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_LAYOUT_STABLE)
+                        } else {
+                            window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_VISIBLE
+                        }
+                    },
+                    onTrackDialog = { type, title ->
+                        TrackSelectionDialogBuilder(this, title, player!!, type).build().show()
                     }
                 )
             }
@@ -146,7 +168,9 @@ private fun NexoraApp(
     onSeries: (String, String, String, String, (List<Channel>, String?) -> Unit) -> Unit,
     onEpg: (String, String, String, String, (List<EpgProgram>, String?) -> Unit) -> Unit,
     onPlay: (Channel?) -> Unit,
-    playerView: @Composable () -> Unit
+    playerView: @Composable (Boolean) -> Unit,
+    onFullscreen: (Boolean) -> Unit,
+    onTrackDialog: (Int, String) -> Unit
 ) {
     val context = LocalContext.current
     val preferences = remember { context.getSharedPreferences("nexora_preferences", 0) }
@@ -172,6 +196,7 @@ private fun NexoraApp(
     var epg by remember { mutableStateOf<List<EpgProgram>>(emptyList()) }
     var epgTitle by remember { mutableStateOf("") }
     var showEpg by remember { mutableStateOf(false) }
+    var fullscreen by remember { mutableStateOf(false) }
 
     val allItems = remember(catalog) { catalog.live + catalog.movies + catalog.series }
     val currentList = remember(catalog, tab, favorites) {
@@ -195,7 +220,7 @@ private fun NexoraApp(
 
     BackHandler(enabled = selected != null || showingEpisodes || connected) {
         when {
-            selected != null -> { selected = null; onPlay(null) }
+            selected != null -> { if (fullscreen) { fullscreen = false; onFullscreen(false) } else { selected = null; onPlay(null) } }
             showingEpisodes -> showingEpisodes = false
             connected -> { connected = false; message = null }
         }
@@ -206,19 +231,31 @@ private fun NexoraApp(
             selected != null -> {
                 val item = selected!!
                 Column(
-                    Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp),
+                    Modifier.fillMaxSize().then(if (fullscreen) Modifier else Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)),
                     verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    BrandHeader(
+                    if (!fullscreen) BrandHeader(
                         trailing = {
                             TextButton(onClick = { selected = null; onPlay(null) }) {
                                 Text("LIBRARY", color = Accent, fontWeight = FontWeight.Bold)
                             }
                         }
                     )
-                    Text(item.name, color = TextPrimary, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                    playerView()
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    if (!fullscreen) Text(item.name, color = TextPrimary, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                    Box(Modifier.fillMaxWidth().then(if (fullscreen) Modifier.weight(1f) else Modifier)) {
+                        playerView(fullscreen)
+                        Row(Modifier.align(Alignment.TopEnd).padding(8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Surface(color = Color.Black.copy(alpha = 0.72f), shape = RoundedCornerShape(12.dp)) {
+                                Row(Modifier.padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    TextButton(onClick = { onTrackDialog(C.TRACK_TYPE_VIDEO, "Video quality") }) { Text("QUALITY", color = Accent, fontSize = 10.sp) }
+                                    TextButton(onClick = { onTrackDialog(C.TRACK_TYPE_AUDIO, "Audio track") }) { Text("AUDIO", color = Accent, fontSize = 10.sp) }
+                                    TextButton(onClick = { onTrackDialog(C.TRACK_TYPE_TEXT, "Subtitles") }) { Text("SUBTITLES", color = Accent, fontSize = 10.sp) }
+                                    TextButton(onClick = { fullscreen = !fullscreen; onFullscreen(fullscreen) }) { Text(if (fullscreen) "EXIT" else "FULL" , color = Accent, fontSize = 10.sp) }
+                                }
+                            }
+                        }
+                    }
+                    if (!fullscreen) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text(item.group, color = TextSecondary, fontSize = 13.sp)
                         if (item.type == MediaType.LIVE && item.streamId != null && mode == 1) {
                             TextButton(onClick = {
@@ -231,8 +268,8 @@ private fun NexoraApp(
                             }) { Text("PROGRAM GUIDE") }
                         }
                     }
-                    Text(
-                        "Playback controls and available audio/subtitle tracks are provided by the stream.",
+                    if (!fullscreen) Text(
+                        "Choose video quality, audio and subtitle tracks when the stream provides them. Fullscreen switches to landscape.",
                         color = TextSecondary, fontSize = 12.sp
                     )
                 }
